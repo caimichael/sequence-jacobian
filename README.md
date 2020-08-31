@@ -5,6 +5,14 @@ Interactive guide to Auclert, Bardóczy, Rognlie, Straub (2019):
 
 [Click here](https://github.com/shade-econ/sequence-jacobian/archive/master.zip) to download all files as a zip. Note: **major update** on July 26, 2019.
 
+## 0. Branch Notes
+
+The branch `constrained_multi_root` is for enhancing the functionality of the constrained multivariate residual
+construction for constrained multivariate root-finding. Linear continuation is the default that has already been
+implemented; however, transforming the search domain using the logistic function/soft-plus function
+is still be done as well as including the option of turning the root-finding procedure into a general
+minimization method, using actual constrained minimization algorithms available in scipy.
+
 ## 1. Resources
 
 - [Paper](https://shade-econ.github.io/sequence-jacobian/sequence_jacobian_paper.pdf)

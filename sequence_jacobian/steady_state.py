@@ -230,7 +230,7 @@ def _solve_for_unknowns(residual, unknowns, solver, solver_kwargs,
             constrained_residual = constrained_multivariate_residual(residual, bounds, verbose=verbose,
                                                                      method=constrained_method,
                                                                      **constrained_kwargs)
-            unknown_solutions, _ = utils.solvers.broyden_solver(constrained_residual, initial_values,
+            unknown_solutions, _ = utils.solvers.broyden_solver(constrained_residual, initial_values, bounds=bounds,
                                                                 verbose=verbose, tol=tol, **solver_kwargs)
         unknown_solutions = list(unknown_solutions)
     elif solver == "solved":
@@ -279,9 +279,19 @@ def extract_multivariate_initial_values_and_bounds(unknowns):
     return np.asarray(initial_values), multi_bounds
 
 
-def residual_with_linear_continuation(residual, bounds, eval_at_boundary=False,
-                                      boundary_epsilon=1e-4, penalty_scale=1e1,
-                                      verbose=False):
+def constrained_multivariate_residual(residual, bounds, method="linear_continuation", verbose=False,
+                                      **constrained_kwargs):
+    """Return a constrained version of the residual function, which accounts for bounds, using the specified method.
+    See the docstring of the specific method of interest for further details."""
+    if method == "linear_continuation":
+        return residual_with_linear_continuation(residual, bounds, verbose=verbose, **constrained_kwargs)
+    # TODO: Implement logistic transform as another option for constrained multivariate residual
+    else:
+        raise ValueError(f"Method {method} for constrained multivariate root-finding has not yet been implemented.")
+
+
+def residual_with_linear_continuation(residual, bounds, boundary_epsilon=1e-4,
+                                      penalty_scale=1e1, verbose=False):
     """Modify a residual function to implement bounds by an additive penalty for exceeding the boundaries
     provided, scaled by the amount the guess exceeds the boundary.
 
@@ -318,12 +328,57 @@ def residual_with_linear_continuation(residual, bounds, eval_at_boundary=False,
         to backstep if they encounter a region of the search space that returns nan values.
         See Hitchhiker's Guide to Python post on Mutable Default Arguments: "When the Gotcha Isn't a Gotcha"
         """
-        if eval_at_boundary:
-            x_censored = np.where(x < lbs, lbs, x)
-            x_censored = np.where(x > ubs, ubs, x_censored)
+        x_censored = np.where(x < lbs, lbs + boundary_epsilon, x)
+        x_censored = np.where(x > ubs, ubs - boundary_epsilon, x_censored)
+
+        residual_censored = residual(x_censored)
+
+        if verbose:
+            print(f"Attempted x is {x}")
+            print(f"Censored x is {x_censored}")
+            print(f"The residual_censored is {residual_censored}")
+
+        if np.any(np.isnan(residual_censored)):
+            # Provide a scaled penalty to the solver when trying to evaluate residual() in an undefined region
+            residual_censored = residual_cache[0] * penalty_scale
+
+            if verbose:
+                print(f"The new residual_censored is {residual_censored}")
         else:
-            x_censored = np.where(x < lbs, lbs + boundary_epsilon, x)
-            x_censored = np.where(x > ubs, ubs - boundary_epsilon, x_censored)
+            if not residual_cache:
+                residual_cache.append(residual_censored)
+            else:
+                residual_cache[0] = residual_censored
+
+        if verbose:
+            print(f"The residual_cache is {residual_cache[0]}")
+
+        # Provide an additive, scaled penalty to the solver when trying to evaluate residual() outside of the boundary
+        # residual_with_boundary_penalty = residual_censored + (x - x_censored) * penalty_scale *\
+        #                                  np.sign(residual_censored) * residual_censored
+        # residual_with_boundary_penalty = residual_censored + (x - x_censored) * penalty_scale * residual_censored
+        # return residual_with_boundary_penalty
+        return residual_censored
+
+    return constr_residual
+
+
+def residual_with_domain_transformation(residual, bounds, verbose=False, transform="logistic"):
+    # TODO: REVISE THIS
+    lbs = np.asarray([v[0] for v in bounds.values()])
+    ubs = np.asarray([v[1] for v in bounds.values()])
+
+    def constr_residual(x, residual_cache=[]):
+        """Implements a constrained residual function, where any attempts to evaluate x outside of the
+        bounds provided will result in a linear penalty function scaled by `penalty_scale`.
+
+        Note: We are purposefully using residual_cache as a mutable default argument to cache the most recent
+        valid evaluation (maintain state between function calls) of the residual function to induce solvers
+        to backstep if they encounter a region of the search space that returns nan values.
+        See Hitchhiker's Guide to Python post on Mutable Default Arguments: "When the Gotcha Isn't a Gotcha"
+        """
+        x_censored = np.where(x < lbs, lbs + boundary_epsilon, x)
+        x_censored = np.where(x > ubs, ubs - boundary_epsilon, x_censored)
 
         residual_censored = residual(x_censored)
 
@@ -354,16 +409,6 @@ def residual_with_linear_continuation(residual, bounds, eval_at_boundary=False,
 
     return constr_residual
 
-
-def constrained_multivariate_residual(residual, bounds, method="linear_continuation", verbose=False,
-                                      **constrained_kwargs):
-    """Return a constrained version of the residual function, which accounts for bounds, using the specified method.
-    See the docstring of the specific method of interest for further details."""
-    if method == "linear_continuation":
-        return residual_with_linear_continuation(residual, bounds, verbose=verbose, **constrained_kwargs)
-    # TODO: Implement logistic transform as another option for constrained multivariate residual
-    else:
-        raise ValueError(f"Method {method} for constrained multivariate root-finding has not yet been implemented.")
 
 
 # TODO: After confirming that all is well, put these utility functions somewhere more sensible

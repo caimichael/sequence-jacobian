@@ -63,7 +63,7 @@ def newton_solver(f, x0, y0=None, tol=1E-9, maxcount=100, backtrack_c=0.5, verbo
         raise ValueError(f'No convergence after {maxcount} iterations')
 
 
-def broyden_solver(f, x0, y0=None, tol=1E-9, maxcount=100, backtrack_c=0.5, verbose=True):
+def broyden_solver(f, x0, y0=None, bounds=None, h=1e-5, tol=1E-9, maxcount=100, backtrack_c=0.5, verbose=True):
     """Similar to newton_solver, but solves f(x)=0 using approximate rather than exact Newton direction,
     obtaining approximate Jacobian J=f'(x) from Broyden updating (starting from exact Newton at f'(x0)).
 
@@ -71,12 +71,16 @@ def broyden_solver(f, x0, y0=None, tol=1E-9, maxcount=100, backtrack_c=0.5, verb
     to work for any amount of backtracking if Jacobian not exact.
     """
 
+    if bounds:
+        lbs = np.asarray([v[0] for v in bounds.values()])
+        ubs = np.asarray([v[1] for v in bounds.values()])
+
     x, y = x0, y0
     if y is None:
         y = f(x)
 
     # initialize J with Newton!
-    J = obtain_J(f, x, y)
+    J = obtain_J(f, x, y, h=h)
     for count in range(maxcount):
         if verbose:
             printit(count, x, y)
@@ -85,6 +89,21 @@ def broyden_solver(f, x0, y0=None, tol=1E-9, maxcount=100, backtrack_c=0.5, verb
             return x, y
 
         dx = np.linalg.solve(J, -y)
+
+        if bounds:
+            def rescale_step_by_bounds(x, dx, lbs, ubs, eps=1e-5):
+                scale = 1.
+                inds_exceed_lb = np.where(x + dx < lbs)[0]
+                inds_exceed_ub = np.where(x + dx > ubs)[0]
+                for i in inds_exceed_lb:
+                    scale = min(scale, np.abs((lbs[i] - x[i])/dx[i]))
+                for i in inds_exceed_ub:
+                    scale = min(scale, np.abs((ubs[i] - x[i])/dx[i]))
+                # Scale by 1 + eps, so we don't end up with x[i] exactly = lbs[i] or ubs[i], since then scale is set
+                # to 0 and we get a divide by 0 error in the broyden_update
+                return dx * (1 + eps) * scale, (1 + eps) * scale
+
+            dx, scale = rescale_step_by_bounds(x, dx, lbs, ubs)
 
         # backtrack at most 29 times
         for bcount in range(30):
